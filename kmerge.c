@@ -18,6 +18,7 @@ typedef struct {
     char *current_line;  // pointer matching active layer organically
     size_t line_len;
     size_t capacity;
+    size_t original_normal_cap;
     unsigned int stream_id; // origin file index strictly bounding topological stability constraints natively
     bool is_jumbo;
     bool eof;
@@ -47,21 +48,24 @@ static inline int compare_streams(kStreamState *a, kStreamState *b) {
 }
 
 static inline void heapify_down(MinHeap *h, int idx) {
-    int smallest = idx;
-    int left = 2 * idx;
-    int right = 2 * idx + 1;
-    
-    if (left <= h->size && compare_streams(&h->streams[h->nodes[left]], &h->streams[h->nodes[smallest]]) < 0)
-        smallest = left;
-    if (right <= h->size && compare_streams(&h->streams[h->nodes[right]], &h->streams[h->nodes[smallest]]) < 0)
-        smallest = right;
+    while (1) {
+        int smallest = idx;
+        int left = 2 * idx;
+        int right = 2 * idx + 1;
         
-    if (smallest != idx) {
-        int temp = h->nodes[idx];
-        h->nodes[idx] = h->nodes[smallest];
-        h->nodes[smallest] = temp;
-        // Optimization natively avoiding recursion footprint for raw loops.
-        heapify_down(h, smallest); 
+        if (left <= h->size && compare_streams(&h->streams[h->nodes[left]], &h->streams[h->nodes[smallest]]) < 0)
+            smallest = left;
+        if (right <= h->size && compare_streams(&h->streams[h->nodes[right]], &h->streams[h->nodes[smallest]]) < 0)
+            smallest = right;
+            
+        if (smallest != idx) {
+            int temp = h->nodes[idx];
+            h->nodes[idx] = h->nodes[smallest];
+            h->nodes[smallest] = temp;
+            idx = smallest;
+        } else {
+            break;
+        }
     }
 }
 
@@ -70,7 +74,7 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
         free(stream->jumbo_buf);
         stream->jumbo_buf = NULL;
         stream->is_jumbo = false;
-        stream->capacity = DEFAULT_NORMAL_CAPACITY;
+        stream->capacity = stream->original_normal_cap;
         stream->current_line = stream->normal_buf;
     }
 
@@ -181,6 +185,7 @@ int main(int argc, char **argv) {
     }
     
     kStreamState *streams = malloc(sizeof(kStreamState) * num_files);
+    if (!streams) { perror("malloc streams"); exit(EXIT_FAILURE); }
     int active_streams = 0;
     
     for (int i = 0; i < num_files; i++) {
@@ -196,9 +201,11 @@ int main(int argc, char **argv) {
         
         streams[active_streams].fp = f;
         streams[active_streams].normal_buf = malloc(normal_cap);
+        if (!streams[active_streams].normal_buf) { perror("malloc normal_buf"); exit(EXIT_FAILURE); }
         streams[active_streams].jumbo_buf = NULL;
         streams[active_streams].current_line = streams[active_streams].normal_buf;
         streams[active_streams].capacity = normal_cap;
+        streams[active_streams].original_normal_cap = normal_cap;
         streams[active_streams].stream_id = active_streams;
         streams[active_streams].is_jumbo = false;
         streams[active_streams].eof = false;
@@ -234,6 +241,7 @@ int main(int argc, char **argv) {
     heap.streams = streams;
     // 1-based indexing explicitly mapped for boundary mathematics.
     heap.nodes = malloc(sizeof(int) * (active_streams + 1));
+    if (!heap.nodes) { perror("malloc heap.nodes"); exit(EXIT_FAILURE); }
     for (int i = 0; i < active_streams; i++) {
         heap.nodes[i + 1] = i; 
     }
