@@ -33,6 +33,7 @@ gcc -Wall -Wextra -O3 -march=native -flto -funroll-loops -std=c11 -D_POSIX_C_SOU
 | `-j` | `--jumbo-threshold` | Maximum explicit string length in bytes allowed before natively throwing an `EXIT_FAILURE` safeguard. | `100` MB |
 | `-p` | `--progress` | Emit telemetry tracking lines successfully emitted directly cleanly out to `stderr`. | `false` |
 | `-f` | `--progress-interval` | Specify progress reporting interval in seconds. | `5` |
+| `-c` | `--color` | Enable ANSI colored terminal outputs. | `false` |
 | `-F` | `--force` | Force overwrite of the output file if it already exists. | `false` |
 | `-h` / `-?` | `--help` | Detailed flag breakdowns and syntax mapping natively. |  |
 

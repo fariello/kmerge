@@ -10,6 +10,12 @@
 #include <locale.h>
 #include <sys/stat.h>
 
+static bool use_color = false;
+
+#define K_PREFIX (use_color ? "[\033[36mkmerge\033[0m]" : "[kmerge]")
+#define FATAL_PREFIX (use_color ? "\033[31mFATAL:\033[0m" : "FATAL:")
+#define INFO_PREFIX (use_color ? "\033[33mINFO:\033[0m" : "INFO:")
+
 #define DEFAULT_NORMAL_CAPACITY (16 * 1024)
 #define DEFAULT_JUMBO_THRESHOLD (100 * 1024 * 1024)
 
@@ -119,7 +125,7 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
 
         if (pos >= stream->capacity) {
             if (pos >= jumbo_threshold) {
-                fprintf(stderr, "\n[kmerge] FATAL: Line in file '%s' exceeds jumbo threshold (%zu bytes).\n", stream->filename, jumbo_threshold);
+                fprintf(stderr, "\n%s %s Line in file '%s' exceeds jumbo threshold (%zu bytes).\n", K_PREFIX, FATAL_PREFIX, stream->filename, jumbo_threshold);
                 exit(EXIT_FAILURE);
             }
             
@@ -148,7 +154,7 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
         if (pos >= stream->capacity) {
             size_t new_cap = stream->capacity + 1;
             if (new_cap > jumbo_threshold) {
-                fprintf(stderr, "\n[kmerge] FATAL: Appending newline exceeds jumbo threshold.\n");
+                fprintf(stderr, "\n%s %s Appending newline exceeds jumbo threshold.\n", K_PREFIX, FATAL_PREFIX);
                 exit(EXIT_FAILURE);
             }
             if (!stream->is_jumbo) {
@@ -181,6 +187,7 @@ static void print_help(const char *prog_name) {
     printf("  -j, --jumbo-threshold <size> Maximum line length threshold in bytes before failure (default: %d)\n", DEFAULT_JUMBO_THRESHOLD);
     printf("  -p, --progress               Enable periodic progress reporting to stderr\n");
     printf("  -f, --progress-interval <s > Specify progress reporting interval in seconds (default: 5)\n");
+    printf("  -c, --color                  Enable ANSI colored terminal outputs\n");
     printf("  -F, --force                  Force overwrite of the output file if it already exists\n");
     printf("  -h, -?, --help               Display this detailed help message and exit\n");
     printf("\nExample:\n");
@@ -204,6 +211,7 @@ int main(int argc, char **argv) {
         {"jumbo-threshold", required_argument, 0, 'j'},
         {"progress", no_argument, 0, 'p'},
         {"progress-interval", required_argument, 0, 'f'},
+        {"color", no_argument, 0, 'c'},
         {"force", no_argument, 0, 'F'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
@@ -211,13 +219,14 @@ int main(int argc, char **argv) {
     
     int opt;
     opterr = 0; // Disable automatic getopt error messages
-    while ((opt = getopt_long(argc, argv, "o:e:j:pf:Fh", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "o:e:j:pf:cFh", long_options, NULL)) != -1) {
         switch (opt) {
             case 'o': output_file = optarg; break;
             case 'e': normal_cap = (size_t)atol(optarg); break;
             case 'j': jumbo_threshold = (size_t)atol(optarg); break;
             case 'p': progress_mode = true; break;
             case 'f': progress_interval = (unsigned int)atoi(optarg); break;
+            case 'c': use_color = true; break;
             case 'F': force_overwrite = true; break;
             case 'h':
                 print_help(argv[0]);
@@ -241,7 +250,7 @@ int main(int argc, char **argv) {
     
     int num_files = argc - optind;
     if (num_files < 1) {
-        fprintf(stderr, "[kmerge] FATAL: Requires at least 1 input file.\n");
+        fprintf(stderr, "%s %s Requires at least 1 input file.\n", K_PREFIX, FATAL_PREFIX);
         fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -294,7 +303,7 @@ int main(int argc, char **argv) {
     }
     
     if (active_streams == 0) {
-        fprintf(stderr, "[kmerge] INFO: All input files are empty.\n");
+        fprintf(stderr, "%s %s All input files are empty.\n", K_PREFIX, INFO_PREFIX);
         return EXIT_SUCCESS;
     }
     
@@ -310,11 +319,11 @@ int main(int argc, char **argv) {
                 }
             }
             if (is_input) {
-                fprintf(stderr, "[kmerge] FATAL: Cowardly refusing to overwrite active input file '%s'\n", output_file);
+                fprintf(stderr, "%s %s Cowardly refusing to overwrite active input file '%s'\n", K_PREFIX, FATAL_PREFIX, output_file);
                 exit(EXIT_FAILURE);
             }
             if (!force_overwrite) {
-                fprintf(stderr, "[kmerge] FATAL: Output file '%s' already exists. Use --force to overwrite.\n", output_file);
+                fprintf(stderr, "%s %s Output file '%s' already exists. Use --force to overwrite.\n", K_PREFIX, FATAL_PREFIX, output_file);
                 exit(EXIT_FAILURE);
             }
         }
@@ -392,7 +401,7 @@ int main(int argc, char **argv) {
                     format_commas(total_emitted, em_buf);
                     format_commas((unsigned long long)rows_per_sec, rate_comma_buf);
                     
-                    fprintf(stderr, "[kmerge progress] Merged %s rows (%s rows/sec, %s/s) | %s\n", em_buf, rate_comma_buf, rate_buf, eta_buf);
+                    fprintf(stderr, "%s Merged %s rows (%s rows/sec, %s/s) | %s\n", K_PREFIX, em_buf, rate_comma_buf, rate_buf, eta_buf);
                     last_progress_time = current;
                 }
             }
@@ -433,7 +442,7 @@ int main(int argc, char **argv) {
         char em_buf[32], rate_comma_buf[32];
         format_commas(total_emitted, em_buf);
         format_commas((unsigned long long)overall_rate, rate_comma_buf);
-        fprintf(stderr, "[kmerge progress] Merge complete: %s rows merged (%s rows/sec, %s/s) in %lld seconds.\n", em_buf, rate_comma_buf, rate_buf, (long long)total_elapsed);
+        fprintf(stderr, "%s Merge complete: %s rows merged (%s rows/sec, %s/s) in %lld seconds.\n", K_PREFIX, em_buf, rate_comma_buf, rate_buf, (long long)total_elapsed);
     }
     
     return EXIT_SUCCESS;
