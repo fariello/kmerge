@@ -116,6 +116,19 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
     return true;
 }
 
+static void print_help(const char *prog_name) {
+    printf("Usage: %s [OPTIONS] FILE1 FILE2 ...\n\n", prog_name);
+    printf("A high-performance C-based K-way merge utility for line-based files.\n");
+    printf("Files must be lexicographically sorted prior to merging.\n\n");
+    printf("Options:\n");
+    printf("  -o, --output <file>          Path to the output file (default: stdout)\n");
+    printf("  -e, --expected-length <size> Expected initial capacity for normal lines in bytes (default: %d)\n", DEFAULT_NORMAL_CAPACITY);
+    printf("  -j, --jumbo-threshold <size> Maximum line length threshold in bytes before failure (default: %d)\n", DEFAULT_JUMBO_THRESHOLD);
+    printf("  -p, --progress               Enable periodic progress reporting to stderr\n");
+    printf("  -h, -?, --help               Display this detailed help message and exit\n");
+    printf("\nExample:\n");
+    printf("  %s -e 8192 -p -o merged.csv chunk1.csv chunk2.csv chunk3.csv\n", prog_name);
+}
 
 int main(int argc, char **argv) {
     char *output_file = NULL;
@@ -128,18 +141,34 @@ int main(int argc, char **argv) {
         {"expected-length", required_argument, 0, 'e'},
         {"jumbo-threshold", required_argument, 0, 'j'},
         {"progress", no_argument, 0, 'p'},
+        {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
     
     int opt;
-    while ((opt = getopt_long(argc, argv, "o:e:j:p", long_options, NULL)) != -1) {
+    opterr = 0; // Disable automatic getopt error messages
+    while ((opt = getopt_long(argc, argv, "o:e:j:ph", long_options, NULL)) != -1) {
         switch (opt) {
             case 'o': output_file = optarg; break;
             case 'e': normal_cap = (size_t)atol(optarg); break;
             case 'j': jumbo_threshold = (size_t)atol(optarg); break;
             case 'p': progress_mode = true; break;
+            case 'h':
+                print_help(argv[0]);
+                exit(EXIT_SUCCESS);
+            case '?':
+                if (optopt == '?') {
+                    print_help(argv[0]);
+                    exit(EXIT_SUCCESS);
+                } else if (optopt != 0) {
+                    fprintf(stderr, "%s: invalid option -- '%c'\n", argv[0], optopt);
+                } else {
+                    fprintf(stderr, "%s: unrecognized option '%s'\n", argv[0], argv[optind-1]);
+                }
+                fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
+                exit(EXIT_FAILURE);
             default:
-                fprintf(stderr, "Usage: %s [OPTIONS] FILE1 FILE2 ...\n", argv[0]);
+                fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
@@ -147,6 +176,7 @@ int main(int argc, char **argv) {
     int num_files = argc - optind;
     if (num_files < 1) {
         fprintf(stderr, "[kmerge] FATAL: Requires bounds mapping at least 1 file target explicitly.\n");
+        fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
         exit(EXIT_FAILURE);
     }
     
