@@ -92,7 +92,7 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
 
         if (pos >= stream->capacity) {
             if (pos >= jumbo_threshold) {
-                fprintf(stderr, "\n[kmerge] FATAL: Line inside stream '%s' exceeds active jumbo threshold bounds (%zu bytes) natively.\n", stream->filename, jumbo_threshold);
+                fprintf(stderr, "\n[kmerge] FATAL: Line in file '%s' exceeds jumbo threshold (%zu bytes).\n", stream->filename, jumbo_threshold);
                 exit(EXIT_FAILURE);
             }
             
@@ -121,7 +121,7 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
         if (pos >= stream->capacity) {
             size_t new_cap = stream->capacity + 1;
             if (new_cap > jumbo_threshold) {
-                fprintf(stderr, "\n[kmerge] FATAL: Appending newline bounds logic strictly exceeds jumbo limitations trivially.\n");
+                fprintf(stderr, "\n[kmerge] FATAL: Appending newline exceeds jumbo threshold.\n");
                 exit(EXIT_FAILURE);
             }
             if (!stream->is_jumbo) {
@@ -203,7 +203,7 @@ int main(int argc, char **argv) {
     
     int num_files = argc - optind;
     if (num_files < 1) {
-        fprintf(stderr, "[kmerge] FATAL: Requires bounds mapping at least 1 file target explicitly.\n");
+        fprintf(stderr, "[kmerge] FATAL: Requires at least 1 input file.\n");
         fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -245,7 +245,7 @@ int main(int argc, char **argv) {
     }
     
     if (active_streams == 0) {
-        fprintf(stderr, "[kmerge] INFO: All explicitly mapped files are completely mathematically empty.\n");
+        fprintf(stderr, "[kmerge] INFO: All input files are empty.\n");
         return EXIT_SUCCESS;
     }
     
@@ -276,7 +276,8 @@ int main(int argc, char **argv) {
     }
     
     unsigned long long total_emitted = 0;
-    time_t last_progress_time = time(NULL);
+    time_t start_time = time(NULL);
+    time_t last_progress_time = start_time;
     
     while (heap.size > 0) {
         int winner = heap.nodes[1];
@@ -289,10 +290,12 @@ int main(int argc, char **argv) {
         total_emitted++;
         
         if (progress_mode) {
-            if ((total_emitted & 0xFFFFF) == 0) {
+            if ((total_emitted & 0xFFFF) == 0) {
                 time_t current = time(NULL);
                 if (current - last_progress_time >= 5) {
-                    fprintf(stderr, "[kmerge stats] Emitted sequentially over limit: %llu rows natively...\n", total_emitted);
+                    time_t total_elapsed = current - start_time;
+                    double rows_per_sec = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
+                    fprintf(stderr, "[kmerge progress] Merged %llu rows (%.0f rows/sec)...\n", total_emitted, rows_per_sec);
                     last_progress_time = current;
                 }
             }
@@ -324,7 +327,10 @@ int main(int argc, char **argv) {
     free(heap.nodes);
     
     if (progress_mode) {
-        fprintf(stderr, "[kmerge stats] Merge fully finalized natively: %llu structures perfectly mapped.\n", total_emitted);
+        time_t end_time = time(NULL);
+        time_t total_elapsed = end_time - start_time;
+        double overall_rate = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
+        fprintf(stderr, "[kmerge progress] Merge complete: %llu rows merged (%.0f rows/sec) in %lld seconds.\n", total_emitted, overall_rate, (long long)total_elapsed);
     }
     
     return EXIT_SUCCESS;
