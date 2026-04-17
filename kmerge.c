@@ -39,6 +39,19 @@ static void format_bytes(double bytes, char *buf) {
     sprintf(buf, "%.2f %s", bytes, units[i]);
 }
 
+static void format_commas(unsigned long long n, char *out) {
+    char buf[64];
+    int len = sprintf(buf, "%llu", n);
+    int out_ptr = 0;
+    for (int i = 0; i < len; i++) {
+        if (i > 0 && (len - i) % 3 == 0) {
+            out[out_ptr++] = ',';
+        }
+        out[out_ptr++] = buf[i];
+    }
+    out[out_ptr] = '\0';
+}
+
 typedef struct {
     int size;
     int *nodes;
@@ -375,8 +388,11 @@ int main(int argc, char **argv) {
                             sprintf(eta_buf, "ETA %02d:%02d:%02d", hours, mins, secs);
                         }
                     }
+                    char em_buf[32], rate_comma_buf[32];
+                    format_commas(total_emitted, em_buf);
+                    format_commas((unsigned long long)rows_per_sec, rate_comma_buf);
                     
-                    fprintf(stderr, "[kmerge progress] Merged %'llu rows (%'llu rows/sec, %s/s) | %s\n", total_emitted, (unsigned long long)rows_per_sec, rate_buf, eta_buf);
+                    fprintf(stderr, "[kmerge progress] Merged %s rows (%s rows/sec, %s/s) | %s\n", em_buf, rate_comma_buf, rate_buf, eta_buf);
                     last_progress_time = current;
                 }
             }
@@ -414,7 +430,10 @@ int main(int argc, char **argv) {
         double overall_bytes_rate = total_elapsed > 0 ? (double)total_bytes_emitted / total_elapsed : 0.0;
         char rate_buf[32];
         format_bytes(overall_bytes_rate, rate_buf);
-        fprintf(stderr, "[kmerge progress] Merge complete: %'llu rows merged (%'llu rows/sec, %s/s) in %lld seconds.\n", total_emitted, (unsigned long long)overall_rate, rate_buf, (long long)total_elapsed);
+        char em_buf[32], rate_comma_buf[32];
+        format_commas(total_emitted, em_buf);
+        format_commas((unsigned long long)overall_rate, rate_comma_buf);
+        fprintf(stderr, "[kmerge progress] Merge complete: %s rows merged (%s rows/sec, %s/s) in %lld seconds.\n", em_buf, rate_comma_buf, rate_buf, (long long)total_elapsed);
     }
     
     return EXIT_SUCCESS;
