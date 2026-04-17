@@ -7,6 +7,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <locale.h>
+#include <sys/stat.h>
 
 #define DEFAULT_NORMAL_CAPACITY (16 * 1024)
 #define DEFAULT_JUMBO_THRESHOLD (100 * 1024 * 1024)
@@ -23,7 +25,19 @@ typedef struct {
     bool is_jumbo;
     bool eof;
     char *filename;
+    dev_t st_dev;
+    ino_t st_ino;
 } kStreamState;
+
+static void format_bytes(double bytes, char *buf) {
+    const char *units[] = {"B", "KB", "MB", "GB", "TB", "PB"};
+    int i = 0;
+    while (bytes >= 1024.0 && i < 5) {
+        bytes /= 1024.0;
+        i++;
+    }
+    sprintf(buf, "%.2f %s", bytes, units[i]);
+}
 
 typedef struct {
     int size;
@@ -153,9 +167,11 @@ static void print_help(const char *prog_name) {
     printf("  -e, --expected-length <size> Expected initial capacity for normal lines in bytes (default: %d)\n", DEFAULT_NORMAL_CAPACITY);
     printf("  -j, --jumbo-threshold <size> Maximum line length threshold in bytes before failure (default: %d)\n", DEFAULT_JUMBO_THRESHOLD);
     printf("  -p, --progress               Enable periodic progress reporting to stderr\n");
+    printf("  -f, --progress-interval <s > Specify progress reporting interval in seconds (default: 5)\n");
+    printf("  -F, --force                  Force overwrite of the output file if it already exists\n");
     printf("  -h, -?, --help               Display this detailed help message and exit\n");
     printf("\nExample:\n");
-    printf("  %s -e 8192 -p -o merged.csv chunk1.csv chunk2.csv chunk3.csv\n", prog_name);
+    printf("  %s -e 8192 -p -f 10 -o merged.csv chunk1.csv chunk2.csv chunk3.csv\n", prog_name);
 }
 
 int main(int argc, char **argv) {
@@ -163,24 +179,33 @@ int main(int argc, char **argv) {
     size_t normal_cap = DEFAULT_NORMAL_CAPACITY;
     size_t jumbo_threshold = DEFAULT_JUMBO_THRESHOLD;
     bool progress_mode = false;
+    unsigned int progress_interval = 5;
+    bool force_overwrite = false;
+    
+    setlocale(LC_NUMERIC, "");
+
     
     static struct option long_options[] = {
         {"output", required_argument, 0, 'o'},
         {"expected-length", required_argument, 0, 'e'},
         {"jumbo-threshold", required_argument, 0, 'j'},
         {"progress", no_argument, 0, 'p'},
+        {"progress-interval", required_argument, 0, 'f'},
+        {"force", no_argument, 0, 'F'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
     
     int opt;
     opterr = 0; // Disable automatic getopt error messages
-    while ((opt = getopt_long(argc, argv, "o:e:j:ph", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "o:e:j:pf:Fh", long_options, NULL)) != -1) {
         switch (opt) {
             case 'o': output_file = optarg; break;
             case 'e': normal_cap = (size_t)atol(optarg); break;
             case 'j': jumbo_threshold = (size_t)atol(optarg); break;
             case 'p': progress_mode = true; break;
+            case 'f': progress_interval = (unsigned int)atoi(optarg); break;
+            case 'F': force_overwrite = true; break;
             case 'h':
                 print_help(argv[0]);
                 exit(EXIT_SUCCESS);
@@ -211,6 +236,7 @@ int main(int argc, char **argv) {
     kStreamState *streams = malloc(sizeof(kStreamState) * num_files);
     if (!streams) { perror("malloc streams"); exit(EXIT_FAILURE); }
     int active_streams = 0;
+    unsigned long long total_input_bytes = 0;
     
     for (int i = 0; i < num_files; i++) {
         char *fname = argv[optind + i];
@@ -235,6 +261,16 @@ int main(int argc, char **argv) {
         streams[active_streams].eof = false;
         streams[active_streams].filename = fname;
         
+        struct stat in_st;
+        if (fstat(fileno(f), &in_st) == 0) {
+            streams[active_streams].st_dev = in_st.st_dev;
+            streams[active_streams].st_ino = in_st.st_ino;
+            total_input_bytes += in_st.st_size;
+        } else {
+            streams[active_streams].st_dev = 0;
+            streams[active_streams].st_ino = 0;
+        }
+        
         // Prime explicit tracking sequence cleanly over bounds.
         if (read_next_line(&streams[active_streams], jumbo_threshold)) {
             active_streams++;
@@ -251,6 +287,25 @@ int main(int argc, char **argv) {
     
     FILE *out = stdout;
     if (output_file) {
+        struct stat out_st;
+        if (stat(output_file, &out_st) == 0) {
+            bool is_input = false;
+            for (int i = 0; i < active_streams; i++) {
+                if (streams[i].st_dev == out_st.st_dev && streams[i].st_ino == out_st.st_ino) {
+                    is_input = true;
+                    break;
+                }
+            }
+            if (is_input) {
+                fprintf(stderr, "[kmerge] FATAL: Cowardly refusing to overwrite active input file '%s'\n", output_file);
+                exit(EXIT_FAILURE);
+            }
+            if (!force_overwrite) {
+                fprintf(stderr, "[kmerge] FATAL: Output file '%s' already exists. Use --force to overwrite.\n", output_file);
+                exit(EXIT_FAILURE);
+            }
+        }
+    
         out = fopen(output_file, "w");
         if (!out) {
             perror(output_file);
@@ -276,6 +331,7 @@ int main(int argc, char **argv) {
     }
     
     unsigned long long total_emitted = 0;
+    unsigned long long total_bytes_emitted = 0;
     time_t start_time = time(NULL);
     time_t last_progress_time = start_time;
     
@@ -288,14 +344,39 @@ int main(int argc, char **argv) {
             exit(EXIT_FAILURE);
         }
         total_emitted++;
+        total_bytes_emitted += w_stream->line_len;
         
         if (progress_mode) {
             if ((total_emitted & 0xFFFF) == 0) {
                 time_t current = time(NULL);
-                if (current - last_progress_time >= 5) {
+                if (current - last_progress_time >= progress_interval) {
                     time_t total_elapsed = current - start_time;
                     double rows_per_sec = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
-                    fprintf(stderr, "[kmerge progress] Merged %llu rows (%.0f rows/sec)...\n", total_emitted, rows_per_sec);
+                    double bytes_per_sec = total_elapsed > 0 ? (double)total_bytes_emitted / total_elapsed : 0.0;
+                    
+                    char rate_buf[32];
+                    format_bytes(bytes_per_sec, rate_buf);
+                    
+                    double fraction = (total_input_bytes > 0) ? (double)total_bytes_emitted / total_input_bytes : 0.0;
+                    time_t remaining = 0;
+                    if (fraction > 0.0 && fraction < 1.0) {
+                        remaining = (time_t)((total_elapsed / fraction) - total_elapsed);
+                    }
+                    
+                    char eta_buf[64] = "ETA N/A";
+                    if (remaining > 0) {
+                        int days = remaining / 86400;
+                        int hours = (remaining % 86400) / 3600;
+                        int mins = (remaining % 3600) / 60;
+                        int secs = remaining % 60;
+                        if (days > 0) {
+                            sprintf(eta_buf, "ETA %d days %02d:%02d:%02d", days, hours, mins, secs);
+                        } else {
+                            sprintf(eta_buf, "ETA %02d:%02d:%02d", hours, mins, secs);
+                        }
+                    }
+                    
+                    fprintf(stderr, "[kmerge progress] Merged %'llu rows (%'llu rows/sec, %s/s) | %s\n", total_emitted, (unsigned long long)rows_per_sec, rate_buf, eta_buf);
                     last_progress_time = current;
                 }
             }
@@ -330,7 +411,10 @@ int main(int argc, char **argv) {
         time_t end_time = time(NULL);
         time_t total_elapsed = end_time - start_time;
         double overall_rate = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
-        fprintf(stderr, "[kmerge progress] Merge complete: %llu rows merged (%.0f rows/sec) in %lld seconds.\n", total_emitted, overall_rate, (long long)total_elapsed);
+        double overall_bytes_rate = total_elapsed > 0 ? (double)total_bytes_emitted / total_elapsed : 0.0;
+        char rate_buf[32];
+        format_bytes(overall_bytes_rate, rate_buf);
+        fprintf(stderr, "[kmerge progress] Merge complete: %'llu rows merged (%'llu rows/sec, %s/s) in %lld seconds.\n", total_emitted, (unsigned long long)overall_rate, rate_buf, (long long)total_elapsed);
     }
     
     return EXIT_SUCCESS;

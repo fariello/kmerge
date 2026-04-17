@@ -32,6 +32,8 @@ gcc -Wall -Wextra -O3 -march=native -flto -funroll-loops -std=c11 -D_POSIX_C_SOU
 | `-e` | `--expected-length` | The initial baseline allocation size in bytes per line. If a line is longer, it dynamically scales up to `jumbo-threshold`. | `16384` (16 KB) |
 | `-j` | `--jumbo-threshold` | Maximum explicit string length in bytes allowed before natively throwing an `EXIT_FAILURE` safeguard. | `100` MB |
 | `-p` | `--progress` | Emit telemetry tracking lines successfully emitted directly cleanly out to `stderr`. | `false` |
+| `-f` | `--progress-interval` | Specify progress reporting interval in seconds. | `5` |
+| `-F` | `--force` | Force overwrite of the output file if it already exists. | `false` |
 | `-h` / `-?` | `--help` | Detailed flag breakdowns and syntax mapping natively. |  |
 
 ### Example
