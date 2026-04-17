@@ -82,6 +82,7 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
     while(1) {
         int c = getc_unlocked(stream->fp);
         if (c == EOF) {
+            if (ferror(stream->fp)) { perror("getc_unlocked"); exit(EXIT_FAILURE); }
             if (pos == 0) {
                 stream->eof = true;
                 return false;
@@ -114,6 +115,29 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
 
         stream->current_line[pos++] = (char)c;
         if (c == '\n') break;
+    }
+    
+    if (pos > 0 && stream->current_line[pos - 1] != '\n') {
+        if (pos >= stream->capacity) {
+            size_t new_cap = stream->capacity + 1;
+            if (new_cap > jumbo_threshold) {
+                fprintf(stderr, "\n[kmerge] FATAL: Appending newline bounds logic strictly exceeds jumbo limitations trivially.\n");
+                exit(EXIT_FAILURE);
+            }
+            if (!stream->is_jumbo) {
+                stream->jumbo_buf = malloc(new_cap);
+                if (!stream->jumbo_buf) { perror("malloc jumbo bounds"); exit(EXIT_FAILURE); }
+                memcpy(stream->jumbo_buf, stream->normal_buf, pos);
+                stream->current_line = stream->jumbo_buf;
+                stream->is_jumbo = true;
+            } else {
+                stream->jumbo_buf = realloc(stream->jumbo_buf, new_cap);
+                if (!stream->jumbo_buf) { perror("realloc jumbo bounds"); exit(EXIT_FAILURE); }
+                stream->current_line = stream->jumbo_buf;
+            }
+            stream->capacity = new_cap;
+        }
+        stream->current_line[pos++] = '\n';
     }
     
     stream->line_len = pos;
@@ -258,14 +282,19 @@ int main(int argc, char **argv) {
         int winner = heap.nodes[1];
         kStreamState *w_stream = &streams[winner];
         
-        fwrite(w_stream->current_line, 1, w_stream->line_len, out);
+        if (fwrite(w_stream->current_line, 1, w_stream->line_len, out) != w_stream->line_len) {
+            perror("fwrite output");
+            exit(EXIT_FAILURE);
+        }
         total_emitted++;
         
         if (progress_mode) {
-            time_t current = time(NULL);
-            if (current - last_progress_time >= 5) {
-                fprintf(stderr, "[kmerge stats] Emitted sequentially over limit: %llu rows natively...\n", total_emitted);
-                last_progress_time = current;
+            if ((total_emitted & 0xFFFFF) == 0) {
+                time_t current = time(NULL);
+                if (current - last_progress_time >= 5) {
+                    fprintf(stderr, "[kmerge stats] Emitted sequentially over limit: %llu rows natively...\n", total_emitted);
+                    last_progress_time = current;
+                }
             }
         }
         
@@ -281,9 +310,9 @@ int main(int argc, char **argv) {
     }
     
     if (out != stdout) {
-        fclose(out);
+        if (fclose(out) != 0) { perror("fclose output"); exit(EXIT_FAILURE); }
     } else {
-        fflush(stdout); 
+        if (fflush(stdout) != 0) { perror("fflush stdout"); exit(EXIT_FAILURE); }
     }
     
     for (int i = 0; i < active_streams; i++) {
