@@ -102,6 +102,24 @@ static inline void heapify_down(MinHeap *h, int idx) {
     }
 }
 
+/* Returns true if the root is still the heap minimum, i.e. it still beats
+ * both of its children. When this is the case after reading a new line from
+ * the winning stream, we can skip heapify_down entirely. */
+static inline bool root_still_wins(MinHeap *h) {
+    /* With only 0 or 1 streams left there is nothing to compare against. */
+    if (h->size <= 1) return true;
+    int left  = 2;
+    int right = 3;
+    /* Check left child (always exists when size >= 2). */
+    if (compare_streams(&h->streams[h->nodes[left]], &h->streams[h->nodes[1]]) < 0)
+        return false;
+    /* Check right child if it exists. */
+    if (right <= h->size &&
+        compare_streams(&h->streams[h->nodes[right]], &h->streams[h->nodes[1]]) < 0)
+        return false;
+    return true;
+}
+
 static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) {
     if (stream->is_jumbo) {
         free(stream->jumbo_buf);
@@ -408,8 +426,14 @@ int main(int argc, char **argv) {
         }
         
         if (read_next_line(w_stream, jumbo_threshold)) {
-            heapify_down(&heap, 1);
+            /* Fast path: if the winner's new line still beats both children,
+             * no heap restructuring is needed at all. This is O(1) vs O(log K)
+             * and fires on the common case where one file dominates a long run. */
+            if (!root_still_wins(&heap)) {
+                heapify_down(&heap, 1);
+            }
         } else {
+            /* Stream exhausted: replace root with the last leaf and sift down. */
             heap.nodes[1] = heap.nodes[heap.size];
             heap.size--;
             if (heap.size > 0) {
