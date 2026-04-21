@@ -45,6 +45,17 @@ static void format_bytes(double bytes, char *buf) {
     sprintf(buf, "%.2f %s", bytes, units[i]);
 }
 
+static void format_duration(time_t secs, char *buf) {
+    int days  = (int)(secs / 86400);
+    int hours = (int)((secs % 86400) / 3600);
+    int mins  = (int)((secs % 3600) / 60);
+    int s     = (int)(secs % 60);
+    if (days > 0)
+        sprintf(buf, "%dd %02d:%02d:%02d", days, hours, mins, s);
+    else
+        sprintf(buf, "%02d:%02d:%02d", hours, mins, s);
+}
+
 static void format_commas(unsigned long long n, char *out) {
     char buf[64];
     int len = sprintf(buf, "%llu", n);
@@ -402,24 +413,26 @@ int main(int argc, char **argv) {
                     if (fraction > 0.0 && fraction < 1.0) {
                         remaining = (time_t)((total_elapsed / fraction) - total_elapsed);
                     }
-                    
-                    char eta_buf[64] = "ETA N/A";
-                    if (remaining > 0) {
-                        int days = remaining / 86400;
-                        int hours = (remaining % 86400) / 3600;
-                        int mins = (remaining % 3600) / 60;
-                        int secs = remaining % 60;
-                        if (days > 0) {
-                            sprintf(eta_buf, "ETA %d days %02d:%02d:%02d", days, hours, mins, secs);
-                        } else {
-                            sprintf(eta_buf, "ETA %02d:%02d:%02d", hours, mins, secs);
-                        }
-                    }
+
+                    char elapsed_buf[32], eta_buf[32];
+                    format_duration(total_elapsed, elapsed_buf);
+                    if (remaining > 0)
+                        format_duration(remaining, eta_buf);
+                    else
+                        strcpy(eta_buf, "N/A");
+
+                    char pct_buf[16];
+                    if (fraction > 0.0)
+                        sprintf(pct_buf, "%.1f%%", fraction * 100.0);
+                    else
+                        strcpy(pct_buf, "?%");
+
                     char em_buf[32], rate_comma_buf[32];
                     format_commas(total_emitted, em_buf);
                     format_commas((unsigned long long)rows_per_sec, rate_comma_buf);
-                    
-                    fprintf(stderr, "%s Merged %s rows (%s rows/sec, %s/s) | %s\n", K_PREFIX, em_buf, rate_comma_buf, rate_buf, eta_buf);
+
+                    fprintf(stderr, "%s Merged %s rows (%s/sec, %s/s) %s Elapsed %s ETA %s\n",
+                            K_PREFIX, em_buf, rate_comma_buf, rate_buf, pct_buf, elapsed_buf, eta_buf);
                     last_progress_time = current;
                 }
             }
@@ -461,12 +474,14 @@ int main(int argc, char **argv) {
         time_t total_elapsed = end_time - start_time;
         double overall_rate = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
         double overall_bytes_rate = total_elapsed > 0 ? (double)total_bytes_emitted / total_elapsed : 0.0;
-        char rate_buf[32];
+        char rate_buf[32], elapsed_buf[32];
         format_bytes(overall_bytes_rate, rate_buf);
+        format_duration(total_elapsed, elapsed_buf);
         char em_buf[32], rate_comma_buf[32];
         format_commas(total_emitted, em_buf);
         format_commas((unsigned long long)overall_rate, rate_comma_buf);
-        fprintf(stderr, "%s Merge complete: %s rows merged (%s rows/sec, %s/s) in %lld seconds.\n", K_PREFIX, em_buf, rate_comma_buf, rate_buf, (long long)total_elapsed);
+        fprintf(stderr, "%s Merge complete: %s rows (%s/sec, %s/s) Elapsed %s\n",
+                K_PREFIX, em_buf, rate_comma_buf, rate_buf, elapsed_buf);
     }
     
     return EXIT_SUCCESS;
