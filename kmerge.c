@@ -306,7 +306,7 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
     
-    kStreamState *streams = malloc(sizeof(kStreamState) * num_files);
+    kStreamState *streams = malloc(sizeof(kStreamState) * (size_t)num_files);
     if (!streams) { perror("malloc streams"); exit(EXIT_FAILURE); }
     int active_streams = 0;
     unsigned long long total_input_bytes = 0;
@@ -329,7 +329,7 @@ int main(int argc, char **argv) {
         streams[active_streams].current_line = streams[active_streams].normal_buf;
         streams[active_streams].capacity = normal_cap;
         streams[active_streams].original_normal_cap = normal_cap;
-        streams[active_streams].stream_id = active_streams;
+        streams[active_streams].stream_id = (unsigned int)active_streams;
         streams[active_streams].is_jumbo = false;
         streams[active_streams].eof = false;
         streams[active_streams].filename = fname;
@@ -338,7 +338,7 @@ int main(int argc, char **argv) {
         if (fstat(fileno(f), &in_st) == 0) {
             streams[active_streams].st_dev = in_st.st_dev;
             streams[active_streams].st_ino = in_st.st_ino;
-            total_input_bytes += in_st.st_size;
+            total_input_bytes += (unsigned long long)in_st.st_size;
         } else {
             streams[active_streams].st_dev = 0;
             streams[active_streams].st_ino = 0;
@@ -393,7 +393,7 @@ int main(int argc, char **argv) {
     heap.size = active_streams;
     heap.streams = streams;
     // 1-based indexing explicitly mapped for boundary mathematics.
-    heap.nodes = malloc(sizeof(int) * (active_streams + 1));
+    heap.nodes = malloc(sizeof(int) * (size_t)(active_streams + 1));
     if (!heap.nodes) { perror("malloc heap.nodes"); exit(EXIT_FAILURE); }
     for (int i = 0; i < active_streams; i++) {
         heap.nodes[i + 1] = i; 
@@ -425,16 +425,16 @@ int main(int argc, char **argv) {
                 time_t current = time(NULL);
                 if (current - last_progress_time >= (time_t)progress_interval) {
                     time_t total_elapsed = current - start_time;
-                    double rows_per_sec = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
-                    double bytes_per_sec = total_elapsed > 0 ? (double)total_bytes_emitted / total_elapsed : 0.0;
+                    double rows_per_sec  = total_elapsed > 0 ? (double)total_emitted      / (double)total_elapsed : 0.0;
+                    double bytes_per_sec = total_elapsed > 0 ? (double)total_bytes_emitted / (double)total_elapsed : 0.0;
                     
                     char rate_buf[32];
                     format_bytes(bytes_per_sec, rate_buf);
                     
-                    double fraction = (total_input_bytes > 0) ? (double)total_bytes_emitted / total_input_bytes : 0.0;
+                    double fraction = (total_input_bytes > 0) ? (double)total_bytes_emitted / (double)total_input_bytes : 0.0;
                     time_t remaining = 0;
                     if (fraction > 0.0 && fraction < 1.0) {
-                        remaining = (time_t)((total_elapsed / fraction) - total_elapsed);
+                        remaining = (time_t)(((double)total_elapsed / fraction) - (double)total_elapsed);
                     }
 
                     char elapsed_buf[32], eta_buf[32];
@@ -450,7 +450,7 @@ int main(int argc, char **argv) {
                     else
                         strcpy(pct_buf, "?%");
 
-                    char em_buf[32], rate_row_buf[32], rate_with_unit[32];
+                    char em_buf[32], rate_row_buf[32], rate_with_unit[64];
                     format_rows(total_emitted, em_buf);
                     format_rows((unsigned long long)rows_per_sec, rate_row_buf);
                     snprintf(rate_with_unit, sizeof(rate_with_unit), "%s/s", rate_buf);
@@ -496,12 +496,12 @@ int main(int argc, char **argv) {
     if (progress_mode) {
         time_t end_time = time(NULL);
         time_t total_elapsed = end_time - start_time;
-        double overall_rate = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
-        double overall_bytes_rate = total_elapsed > 0 ? (double)total_bytes_emitted / total_elapsed : 0.0;
+        double overall_rate       = total_elapsed > 0 ? (double)total_emitted      / (double)total_elapsed : 0.0;
+        double overall_bytes_rate = total_elapsed > 0 ? (double)total_bytes_emitted / (double)total_elapsed : 0.0;
         char rate_buf[32], elapsed_buf[32];
         format_bytes(overall_bytes_rate, rate_buf);
         format_duration(total_elapsed, elapsed_buf);
-        char em_buf[32], rate_row_buf[32], rate_with_unit[32];
+        char em_buf[32], rate_row_buf[32], rate_with_unit[64];
         format_rows(total_emitted, em_buf);
         format_rows((unsigned long long)overall_rate, rate_row_buf);
         snprintf(rate_with_unit, sizeof(rate_with_unit), "%s/s", rate_buf);
