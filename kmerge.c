@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <unistd.h>
-#include <fcntl.h>
+
 #include <locale.h>
 #include <sys/stat.h>
 
@@ -46,12 +46,14 @@ static void format_bytes(double bytes, char *buf) {
 }
 
 static void format_duration(time_t secs, char *buf) {
-    int days  = (int)(secs / 86400);
+    long days = (long)(secs / 86400);
     int hours = (int)((secs % 86400) / 3600);
     int mins  = (int)((secs % 3600) / 60);
     int s     = (int)(secs % 60);
-    if (days > 0)
-        sprintf(buf, "%dd %02d:%02d:%02d", days, hours, mins, s);
+    if (days > 9999)
+        sprintf(buf, ">9999d");
+    else if (days > 0)
+        sprintf(buf, "%ldd %02d:%02d:%02d", days, hours, mins, s);
     else
         sprintf(buf, "%02d:%02d:%02d", hours, mins, s);
 }
@@ -81,14 +83,21 @@ static inline int compare_streams(kStreamState *a, kStreamState *b) {
     if (a->eof && b->eof) return 0;
     if (a->eof) return 1;
     if (b->eof) return -1;
-    
-    size_t min_len = (a->line_len < b->line_len) ? a->line_len : b->line_len;
+
+    /* Exclude the trailing '\n' from both sides so the comparison matches
+     * what `sort` produces.  Including '\n' (value 10) caused lines whose
+     * next byte is '\t' (value 9) or another control char to sort in the
+     * wrong order relative to a shorter line that ends at the same prefix.
+     * read_next_line guarantees line_len >= 1, so subtracting 1 is safe. */
+    size_t len_a = a->line_len - 1;
+    size_t len_b = b->line_len - 1;
+    size_t min_len = (len_a < len_b) ? len_a : len_b;
     int cmp = memcmp(a->current_line, b->current_line, min_len);
     if (cmp != 0) return cmp;
-    
-    if (a->line_len < b->line_len) return -1;
-    if (a->line_len > b->line_len) return 1;
-    
+
+    if (len_a < len_b) return -1;
+    if (len_a > len_b) return 1;
+
     if (a->stream_id < b->stream_id) return -1;
     return 1;
 }
@@ -170,8 +179,9 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
                 stream->current_line = stream->jumbo_buf;
                 stream->is_jumbo = true;
             } else {
-                stream->jumbo_buf = realloc(stream->jumbo_buf, new_cap);
-                if (!stream->jumbo_buf) { perror("realloc jumbo bounds"); exit(EXIT_FAILURE); }
+                char *tmp = realloc(stream->jumbo_buf, new_cap);
+                if (!tmp) { perror("realloc jumbo bounds"); exit(EXIT_FAILURE); }
+                stream->jumbo_buf = tmp;
                 stream->current_line = stream->jumbo_buf;
             }
             stream->capacity = new_cap;
@@ -195,8 +205,9 @@ static inline bool read_next_line(kStreamState *stream, size_t jumbo_threshold) 
                 stream->current_line = stream->jumbo_buf;
                 stream->is_jumbo = true;
             } else {
-                stream->jumbo_buf = realloc(stream->jumbo_buf, new_cap);
-                if (!stream->jumbo_buf) { perror("realloc jumbo bounds"); exit(EXIT_FAILURE); }
+                char *tmp = realloc(stream->jumbo_buf, new_cap);
+                if (!tmp) { perror("realloc jumbo bounds"); exit(EXIT_FAILURE); }
+                stream->jumbo_buf = tmp;
                 stream->current_line = stream->jumbo_buf;
             }
             stream->capacity = new_cap;
@@ -278,7 +289,16 @@ int main(int argc, char **argv) {
                 exit(EXIT_FAILURE);
         }
     }
-    
+
+    if (normal_cap < 1) {
+        fprintf(stderr, "%s %s --expected-length must be at least 1.\n", K_PREFIX, FATAL_PREFIX);
+        exit(EXIT_FAILURE);
+    }
+    if (jumbo_threshold <= normal_cap) {
+        fprintf(stderr, "%s %s --jumbo-threshold must be greater than --expected-length (%zu).\n", K_PREFIX, FATAL_PREFIX, normal_cap);
+        exit(EXIT_FAILURE);
+    }
+
     int num_files = argc - optind;
     if (num_files < 1) {
         fprintf(stderr, "%s %s Requires at least 1 input file.\n", K_PREFIX, FATAL_PREFIX);
@@ -403,7 +423,7 @@ int main(int argc, char **argv) {
         if (progress_mode) {
             if ((total_emitted & 0xFFFF) == 0) {
                 time_t current = time(NULL);
-                if (current - last_progress_time >= progress_interval) {
+                if (current - last_progress_time >= (time_t)progress_interval) {
                     time_t total_elapsed = current - start_time;
                     double rows_per_sec = total_elapsed > 0 ? (double)total_emitted / total_elapsed : 0.0;
                     double bytes_per_sec = total_elapsed > 0 ? (double)total_bytes_emitted / total_elapsed : 0.0;
@@ -430,12 +450,13 @@ int main(int argc, char **argv) {
                     else
                         strcpy(pct_buf, "?%");
 
-                    char em_buf[32], rate_row_buf[32];
+                    char em_buf[32], rate_row_buf[32], rate_with_unit[32];
                     format_rows(total_emitted, em_buf);
                     format_rows((unsigned long long)rows_per_sec, rate_row_buf);
+                    snprintf(rate_with_unit, sizeof(rate_with_unit), "%s/s", rate_buf);
 
-                    fprintf(stderr, "%s %s Merged %s rows (%s/sec, %s/s) %s ETA %s  Open Files: %d\n",
-                            K_PREFIX, elapsed_buf, em_buf, rate_row_buf, rate_buf, pct_buf, eta_buf, heap.size);
+                    fprintf(stderr, "%s %s Merged %7s rows (%7s/sec, %11s) %6s ETA %s  Open Files: %d\n",
+                            K_PREFIX, elapsed_buf, em_buf, rate_row_buf, rate_with_unit, pct_buf, eta_buf, heap.size);
                     last_progress_time = current;
                 }
             }
@@ -480,11 +501,12 @@ int main(int argc, char **argv) {
         char rate_buf[32], elapsed_buf[32];
         format_bytes(overall_bytes_rate, rate_buf);
         format_duration(total_elapsed, elapsed_buf);
-        char em_buf[32], rate_row_buf[32];
+        char em_buf[32], rate_row_buf[32], rate_with_unit[32];
         format_rows(total_emitted, em_buf);
         format_rows((unsigned long long)overall_rate, rate_row_buf);
-        fprintf(stderr, "%s %s Merge complete: %s rows (%s/sec, %s/s)\n",
-                K_PREFIX, elapsed_buf, em_buf, rate_row_buf, rate_buf);
+        snprintf(rate_with_unit, sizeof(rate_with_unit), "%s/s", rate_buf);
+        fprintf(stderr, "%s %s Merge complete: %7s rows (%7s/sec, %11s)\n",
+                K_PREFIX, elapsed_buf, em_buf, rate_row_buf, rate_with_unit);
     }
     
     return EXIT_SUCCESS;
