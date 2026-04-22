@@ -56,17 +56,19 @@ static void format_duration(time_t secs, char *buf) {
         sprintf(buf, "%02d:%02d:%02d", hours, mins, s);
 }
 
-static void format_commas(unsigned long long n, char *out) {
-    char buf[64];
-    int len = sprintf(buf, "%llu", n);
-    int out_ptr = 0;
-    for (int i = 0; i < len; i++) {
-        if (i > 0 && (len - i) % 3 == 0) {
-            out[out_ptr++] = ',';
-        }
-        out[out_ptr++] = buf[i];
+
+static void format_rows(unsigned long long n, char *buf) {
+    const char *suffixes[] = {"", "K", "M", "G", "T", "P"};
+    double val = (double)n;
+    int i = 0;
+    while (val >= 1000.0 && i < 5) {
+        val /= 1000.0;
+        i++;
     }
-    out[out_ptr] = '\0';
+    if (i == 0)
+        sprintf(buf, "%llu", n);
+    else
+        sprintf(buf, "%.1f%s", val, suffixes[i]);
 }
 
 typedef struct {
@@ -333,6 +335,7 @@ int main(int argc, char **argv) {
     
     if (active_streams == 0) {
         fprintf(stderr, "%s %s All input files are empty.\n", K_PREFIX, INFO_PREFIX);
+        free(streams);
         return EXIT_SUCCESS;
     }
     
@@ -427,12 +430,12 @@ int main(int argc, char **argv) {
                     else
                         strcpy(pct_buf, "?%");
 
-                    char em_buf[32], rate_comma_buf[32];
-                    format_commas(total_emitted, em_buf);
-                    format_commas((unsigned long long)rows_per_sec, rate_comma_buf);
+                    char em_buf[32], rate_row_buf[32];
+                    format_rows(total_emitted, em_buf);
+                    format_rows((unsigned long long)rows_per_sec, rate_row_buf);
 
-                    fprintf(stderr, "%s Merged %s rows (%s/sec, %s/s) %s Elapsed %s ETA %s\n",
-                            K_PREFIX, em_buf, rate_comma_buf, rate_buf, pct_buf, elapsed_buf, eta_buf);
+                    fprintf(stderr, "%s %s Merged %s rows (%s/sec, %s/s) %s ETA %s  Open Files: %d\n",
+                            K_PREFIX, elapsed_buf, em_buf, rate_row_buf, rate_buf, pct_buf, eta_buf, heap.size);
                     last_progress_time = current;
                 }
             }
@@ -477,11 +480,11 @@ int main(int argc, char **argv) {
         char rate_buf[32], elapsed_buf[32];
         format_bytes(overall_bytes_rate, rate_buf);
         format_duration(total_elapsed, elapsed_buf);
-        char em_buf[32], rate_comma_buf[32];
-        format_commas(total_emitted, em_buf);
-        format_commas((unsigned long long)overall_rate, rate_comma_buf);
-        fprintf(stderr, "%s Merge complete: %s rows (%s/sec, %s/s) Elapsed %s\n",
-                K_PREFIX, em_buf, rate_comma_buf, rate_buf, elapsed_buf);
+        char em_buf[32], rate_row_buf[32];
+        format_rows(total_emitted, em_buf);
+        format_rows((unsigned long long)overall_rate, rate_row_buf);
+        fprintf(stderr, "%s %s Merge complete: %s rows (%s/sec, %s/s)\n",
+                K_PREFIX, elapsed_buf, em_buf, rate_row_buf, rate_buf);
     }
     
     return EXIT_SUCCESS;
