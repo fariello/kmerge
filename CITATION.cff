@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "kmerge"
+abstract: >-
+  A fast k-way external merge tool for large CSV/line datasets, with bounded memory and native progress reporting.
+type: software
+authors:
+  - family-names: "Fariello"
+    given-names: "Gabriele G. R."
+    email: "gfariello@fariel.com"
+repository-code: "https://github.com/fariello/kmerge"
+url: "https://github.com/fariello/kmerge"
+license: Apache-2.0
+date-released: "2026-07-05"

@@ -46,3 +46,27 @@ Merge 4 chunk datasets explicitly sizing boundaries to 8KB while emitting progre
 ## Internal Architecture
 - **Jumbo Safeties:** Input lines usually inhabit standard constraints (e.g., `< 16KB`). When a monstrous line traverses the feed, `kmerge` briefly shifts its memory mode over into "Jumbo" capacities mathematically accommodating the string, then forcefully shreds the geometry right back down to native original bounds to conserve parallel RAM cleanly.
 - **Fail Safes:** Native error handling captures trailing file boundaries accurately preserving anomalies avoiding accidental padding concatenation on missing `\n` formats. Explicit tracking logs structural fail hooks on file space limits seamlessly.
+
+
+---
+
+## License, Attribution & Citation
+
+`kmerge` is licensed under the **Apache License 2.0** (see `LICENSE` and `NOTICE`).
+
+**Attribution (required).** Under Apache-2.0 §4(d), any distribution of this software or a
+derivative work must retain the `NOTICE` file and display its attribution reasonably
+prominently. Concretely, derived/redistributed works must include the following, visibly,
+in the project README (or equivalent top-level documentation) and in any "About"/credits
+screen the software presents:
+
+> Based on the original kmerge by Gabriele G. R. Fariello (https://github.com/fariello/kmerge).
+
+**Citation.** If you use `kmerge` in academic or scholarly work, please cite it. GitHub's
+"Cite this repository" button (backed by `CITATION.cff`) provides ready-to-use formats. A
+suggested citation:
+
+> Fariello, Gabriele G. R. *kmerge*. 2026. https://github.com/fariello/kmerge
+
+The attribution and citation requests impose no warranty or liability on the author; the
+software is provided "AS IS" per the LICENSE.
